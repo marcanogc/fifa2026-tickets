@@ -44,8 +44,17 @@ router.post('/purchase', authMiddleware, async (req, res) => {
 
         const ticket = ticketResult.recordset[0];
 
+        if (ticket.available_quantity <= 0) {
+          const err = new Error(`Setor "${ticket.category}" esgotado`);
+          err.statusCode = 400;
+          throw err;
+        }
         if (ticket.available_quantity < item.quantity) {
-          throw new Error(`Quantidade insuficiente para ${ticket.category}`);
+          const err = new Error(
+            `Apenas ${ticket.available_quantity} ingressos disponíveis em "${ticket.category}" (você pediu ${item.quantity})`
+          );
+          err.statusCode = 400;
+          throw err;
         }
 
         // Atualizar quantidade disponível
@@ -95,7 +104,8 @@ router.post('/purchase', authMiddleware, async (req, res) => {
     }
   } catch (err) {
     console.error('Erro na compra:', err);
-    res.status(500).json({ error: err.message || 'Erro ao processar compra' });
+    const statusCode = err.statusCode || 500;
+    res.status(statusCode).json({ error: err.message || 'Erro ao processar compra' });
   }
 });
 

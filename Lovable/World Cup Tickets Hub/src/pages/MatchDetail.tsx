@@ -3,8 +3,10 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Calendar, MapPin, Users, Minus, Plus, ShoppingCart, ArrowLeft, Check, Loader2,
+  TrendingUp, AlertCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
 import { TeamFlag } from '@/components/TeamFlag';
 import { useCart } from '@/contexts/CartContext';
 import { useToast } from '@/hooks/use-toast';
@@ -93,10 +95,44 @@ const MatchDetail: React.FC = () => {
   });
 
   const stadium: ApiStadium | undefined = stadiumData?.data?.stadium;
-  // Preços por FASE (Final >> Quartas >> Grupos) baseados em FIFA 2026 oficial
-  const sectors = match
+
+  // Disponibilidade real por setor (DB) — fonte de verdade para preço, ocupação e bloqueio
+  const { data: ticketsData } = useQuery({
+    queryKey: ['match-tickets', id],
+    queryFn: () => api.getMatchTickets(id!),
+    enabled: !!id,
+  });
+
+  interface ApiTicket {
+    id: number;
+    category: string;
+    price: number;
+    available_quantity: number;
+    sold_quantity: number;
+  }
+  const apiTickets: ApiTicket[] = ticketsData?.data?.tickets || [];
+
+  // Mapeia setor estático (com descrição) e enriquece com dados reais da API
+  const staticSectors = match
     ? getSectorsByMatch(match.stage, stadium?.capacity || 70000)
     : [];
+  const sectors = staticSectors.map((s) => {
+    const apiTicket = apiTickets.find((t) => t.category === s.name);
+    if (!apiTicket) return { ...s, available: s.capacity, sold: 0, total: s.capacity, ticketCategoryId: 0 };
+    return {
+      ...s,
+      price: apiTicket.price,
+      total: apiTicket.available_quantity + apiTicket.sold_quantity,
+      available: apiTicket.available_quantity,
+      sold: apiTicket.sold_quantity,
+      ticketCategoryId: apiTicket.id,
+    };
+  });
+
+  // Ocupação geral do estádio (todos os setores)
+  const totalCap = sectors.reduce((acc, s) => acc + s.total, 0);
+  const totalSold = sectors.reduce((acc, s) => acc + s.sold, 0);
+  const occupancy = totalCap > 0 ? Math.round((totalSold / totalCap) * 100) : 0;
 
   if (isLoading) {
     return (
@@ -267,39 +303,97 @@ const MatchDetail: React.FC = () => {
               </div>
             </div>
 
+            {/* Ocupação do estádio */}
+            {totalCap > 0 && (
+              <div className="rounded-2xl bg-card border border-border p-6">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-primary" />
+                    <h3 className="font-display text-lg">Ocupação do estádio</h3>
+                  </div>
+                  <span className={cn(
+                    'font-display text-2xl',
+                    occupancy >= 90 ? 'text-red-500' :
+                    occupancy >= 70 ? 'text-orange-500' : 'text-green-600'
+                  )}>
+                    {occupancy}%
+                  </span>
+                </div>
+                <Progress value={occupancy} className="h-3" />
+                <p className="text-xs text-muted-foreground mt-2">
+                  {totalSold.toLocaleString()} ingressos vendidos de {totalCap.toLocaleString()} disponíveis
+                  {occupancy >= 95 && ' · Estádio quase lotado!'}
+                  {occupancy >= 70 && occupancy < 95 && ' · Vendas em alta'}
+                  {occupancy < 70 && ' · Boa disponibilidade'}
+                </p>
+              </div>
+            )}
+
             {/* Sectors */}
             <div>
               <h3 className="font-display text-2xl mb-6">Escolha seu Setor</h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {sectors.map((sector) => {
                   const isSelected = selectedSector?.id === sector.id;
+                  const isSoldOut = sector.available === 0;
+                  const isFewLeft = sector.available > 0 && sector.available < 100;
+                  const sectorOccupancy = sector.total > 0 ? Math.round((sector.sold / sector.total) * 100) : 0;
                   return (
                     <button
                       key={sector.id}
-                      onClick={() => setSelectedSector(sector)}
+                      onClick={() => !isSoldOut && setSelectedSector(sector)}
+                      disabled={isSoldOut}
                       className={cn(
                         'relative p-6 rounded-2xl border-2 text-left transition-all duration-200',
-                        isSelected
+                        isSelected && !isSoldOut
                           ? 'border-primary bg-primary/10 glow-gold'
+                          : isSoldOut
+                          ? 'border-border bg-muted/40 opacity-60 cursor-not-allowed'
                           : 'border-border hover:border-primary/50 hover:bg-secondary/50'
                       )}
                     >
-                      {isSelected && (
+                      {isSelected && !isSoldOut && (
                         <div className="absolute top-4 right-4 w-6 h-6 rounded-full bg-primary flex items-center justify-center">
                           <Check className="w-4 h-4 text-primary-foreground" />
                         </div>
                       )}
+                      {isSoldOut && (
+                        <div className="absolute top-4 right-4 px-2.5 py-1 rounded-full bg-red-500/20 text-red-500 text-xs font-bold">
+                          ESGOTADO
+                        </div>
+                      )}
 
                       <h4 className="font-display text-xl mb-2">{sector.name}</h4>
-                      <p className="text-sm text-muted-foreground mb-4 leading-snug">{sector.description}</p>
+                      <p className="text-sm text-muted-foreground mb-4 leading-snug line-clamp-2">{sector.description}</p>
+
+                      <div className="mb-3">
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span className="text-muted-foreground">Ocupação</span>
+                          <span className={cn(
+                            'font-medium',
+                            sectorOccupancy >= 90 ? 'text-red-500' :
+                            sectorOccupancy >= 70 ? 'text-orange-500' : 'text-green-600'
+                          )}>
+                            {sectorOccupancy}%
+                          </span>
+                        </div>
+                        <Progress value={sectorOccupancy} className="h-1.5" />
+                      </div>
 
                       <div className="flex items-end justify-between">
                         <div>
-                          <span className="text-2xl font-bold text-primary">${sector.price}</span>
+                          <span className="text-2xl font-bold text-primary">${sector.price.toLocaleString()}</span>
                           <span className="text-muted-foreground text-sm">/ingresso</span>
                         </div>
-                        <span className="text-xs px-2 py-1 rounded-full bg-success/20 text-success">
-                          {sector.capacity.toLocaleString()} lugares
+                        <span className={cn(
+                          'text-xs px-2 py-1 rounded-full',
+                          isSoldOut ? 'bg-red-500/20 text-red-500' :
+                          isFewLeft ? 'bg-orange-500/20 text-orange-500' :
+                          'bg-success/20 text-success'
+                        )}>
+                          {isSoldOut ? 'Esgotado' :
+                           isFewLeft ? `Últimos ${sector.available}!` :
+                           `${sector.available.toLocaleString()} disponíveis`}
                         </span>
                       </div>
                     </button>
@@ -337,15 +431,37 @@ const MatchDetail: React.FC = () => {
                       <Button
                         variant="outline"
                         size="icon"
-                        onClick={() => setQuantity(Math.min(10, quantity + 1))}
-                        disabled={quantity >= 10}
+                        onClick={() => {
+                          const sector = sectors.find((s) => s.id === selectedSector.id);
+                          const maxQty = Math.min(10, sector?.available ?? 10);
+                          setQuantity(Math.min(maxQty, quantity + 1));
+                        }}
+                        disabled={(() => {
+                          const sector = sectors.find((s) => s.id === selectedSector.id);
+                          const maxQty = Math.min(10, sector?.available ?? 10);
+                          return quantity >= maxQty;
+                        })()}
                       >
                         <Plus className="w-4 h-4" />
                       </Button>
                     </div>
-                    <span className="text-xs text-muted-foreground mt-2 block">
-                      Máximo 10 ingressos por compra
-                    </span>
+                    {(() => {
+                      const sector = sectors.find((s) => s.id === selectedSector.id);
+                      const available = sector?.available ?? 0;
+                      if (available > 0 && available < 10) {
+                        return (
+                          <span className="text-xs text-orange-500 mt-2 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            Apenas {available} ingressos restantes neste setor
+                          </span>
+                        );
+                      }
+                      return (
+                        <span className="text-xs text-muted-foreground mt-2 block">
+                          Máximo 10 ingressos por compra
+                        </span>
+                      );
+                    })()}
                   </div>
 
                   <div className="border-t border-border pt-6 mb-6">
