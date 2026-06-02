@@ -459,7 +459,8 @@ const WorldCupDetail: React.FC = () => {
 
           {/* Sidebar com fatos rápidos */}
           <div className="space-y-6">
-            {/* Bola oficial e mascote (cada card oculta-se sozinho se não houver imagem) */}
+            {/* Logo, bola oficial e mascote (cada card oculta-se sozinho se não houver imagem) */}
+            <CupImageCard year={cup.year} dir="logos" title="Logo oficial" Icon={Award} />
             <CupImageCard year={cup.year} dir="balls" title="Bola oficial" label={cup.ball} Icon={Circle} />
             <CupImageCard year={cup.year} dir="mascots" title="Mascote oficial" label={cup.mascot} Icon={Smile} />
 
