@@ -44,7 +44,11 @@ jobs:
         run: dotnet build ${{ env.PROJECT_PATH }} -c Release --no-restore
 
       - name: Test
-        run: dotnet test src/Fifa2026.V2.Functions.Tests -c Release --no-build --verbosity normal
+        # Sem --no-build: o dotnet test faz restore+build do projeto de testes
+        # (e da dependência Fifa2026.V2.Functions) em Release. Usar --no-build
+        # aqui falharia porque os steps Restore/Build acima cobrem apenas o
+        # projeto das Functions, não o de testes (fix do gate S2.1 / H-1).
+        run: dotnet test src/Fifa2026.V2.Functions.Tests -c Release --verbosity normal
         continue-on-error: false
 
       - name: Publish
